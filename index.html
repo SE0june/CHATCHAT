@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>수다방</title>
+<meta name="description" content="누구나 들어와 수다 떠는 공용 채팅방">
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f4f5f8;--card:#fff;--text:#1d2026;--muted:#8b909a;--line:#e5e7ec;--accent:#4f6bff;--on-accent:#fff;--other:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14161a;--card:#1d2026;--text:#eceef2;--muted:#8b909a;--line:#2b2f37;--accent:#6b82ff;--on-accent:#fff;--other:#262a32}}
+:root[data-theme="dark"]{--bg:#14161a;--card:#1d2026;--text:#eceef2;--muted:#8b909a;--line:#2b2f37;--accent:#6b82ff;--on-accent:#fff;--other:#262a32}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;display:flex;justify-content:center}
+.app{width:100%;max-width:720px;height:100%;display:flex;flex-direction:column;background:var(--card);border-left:1px solid var(--line);border-right:1px solid var(--line)}
+header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px}
+header h1{font-size:18px;margin:0}
+header small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+#me{font-size:13px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer;color:var(--text)}
+#list{flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:10px;background:var(--bg)}
+.empty{margin:auto;color:var(--muted);font-size:14px;text-align:center}
+.row{display:flex;flex-direction:column;max-width:78%;align-items:flex-start}
+.row.mine{align-self:flex-end;align-items:flex-end}
+.nick{font-size:12px;color:var(--muted);margin:0 6px 3px}
+.bubble{background:var(--other);padding:9px 13px;border-radius:16px 16px 16px 4px;font-size:15px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid var(--line)}
+.mine .bubble{background:var(--accent);color:var(--on-accent);border-color:transparent;border-radius:16px 16px 4px 16px}
+.time{font-size:11px;color:var(--muted);margin:3px 6px 0}
+form#send{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--line);background:var(--card)}
+input,button{font:inherit}
+#text{flex:1;min-width:0;padding:11px 14px;border:1px solid var(--line);border-radius:999px;background:var(--bg);color:var(--text);outline:none;font-size:15px}
+#text:focus,#nickIn:focus{border-color:var(--accent)}
+.btn{background:var(--accent);color:var(--on-accent);border:0;border-radius:999px;padding:0 20px;font-weight:600;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:default}
+#join{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:28px 24px;width:100%;max-width:340px;text-align:center}
+.card h2{margin:0 0 6px;font-size:24px}
+.card p{margin:0 0 20px;color:var(--muted);font-size:14px;line-height:1.5}
+#nickIn{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--text);font-size:16px;outline:none;margin-bottom:12px;text-align:center}
+.card .btn{width:100%;padding:12px}
+#err{color:#d94b4b;font-size:13px;min-height:18px;margin-top:10px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="join">
+  <div class="card">
+    <h2>💬 수다방</h2>
+    <p>들어온 모두가 함께 이야기하는 방이에요.<br>메시지는 15분 뒤 사라져요.</p>
+    <input id="nickIn" maxlength="12" placeholder="닉네임 (최대 12자)" autocomplete="off">
+    <button class="btn" id="enter">입장하기</button>
+    <div id="err"></div>
+  </div>
+</div>
+
+<div class="app">
+  <header>
+    <div><h1>💬 수다방</h1><small>메시지는 15분 후 사라져요 · <span id="cnt">연결 중…</span></small></div>
+    <button id="me" title="닉네임 변경"></button>
+  </header>
+  <div id="list"><div class="empty">연결 중…</div></div>
+  <form id="send" autocomplete="off">
+    <input id="text" maxlength="300" placeholder="메시지를 입력하세요" autocomplete="off">
+    <button class="btn" id="go" type="submit">전송</button>
+  </form>
+</div>
+
+<script>
+(function(){
+var TTL = 15 * 60 * 1000;
+var APP_ID = "sudabang-chat-v1";   // 다른 앱과 겹치지 않는 고유 문자열 (원하면 바꾸세요)
+var ROOM = "main";
+var $ = function(id){ return document.getElementById(id); };
+var nick = "", uid = "", byId = {}, ready = false;
+var sendMsg = null, sendHist = null, room = null;
+
+function ls(k, v){
+  try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch(e){ return null; }
+}
+uid = ls("sdb_uid");
+if (!uid) { uid = "u" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); ls("sdb_uid", uid); }
+nick = ls("sdb_nick") || "";
+
+function showJoin(show){ $("join").hidden = !show; if (show) { $("nickIn").value = nick; $("nickIn").focus(); } }
+function setNick(n){ nick = n; ls("sdb_nick", n); $("me").textContent = "👤 " + n; }
+function enter(){
+  var n = $("nickIn").value.trim().replace(/\s+/g, " ");
+  if (!n) { $("err").textContent = "닉네임을 입력해 주세요."; return; }
+  $("err").textContent = "";
+  setNick(n); showJoin(false); $("text").focus();
+}
+$("enter").onclick = enter;
+$("nickIn").addEventListener("keydown", function(e){ if (e.key === "Enter") { e.preventDefault(); enter(); } });
+$("me").onclick = function(){ showJoin(true); };
+if (nick) { setNick(nick); showJoin(false); } else { showJoin(true); }
+
+function fmt(ts){
+  var d = new Date(ts), h = d.getHours(), m = d.getMinutes();
+  return (h < 12 ? "오전 " : "오후 ") + ((h % 12) || 12) + ":" + (m < 10 ? "0" : "") + m;
+}
+function notice(text){
+  var list = $("list"); list.textContent = "";
+  var c = document.createElement("div"); c.className = "empty"; c.textContent = text; list.appendChild(c);
+}
+
+function live(){
+  var now = Date.now();
+  return Object.keys(byId).map(function(k){ return byId[k]; })
+    .filter(function(m){ return now - m.ts < TTL; })
+    .sort(function(a, b){ return a.ts - b.ts; });
+}
+
+function render(){
+  var list = $("list");
+  if (!ready) { notice("연결 중…"); return; }
+  var arr = live();
+  if (!arr.length) { notice("아직 아무도 말을 안 했어요. 첫 메시지를 남겨보세요!"); return; }
+  var near = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  list.textContent = "";
+  arr.forEach(function(m){
+    var mine = m.uid === uid;
+    var row = document.createElement("div"); row.className = "row" + (mine ? " mine" : "");
+    if (!mine) { var n = document.createElement("div"); n.className = "nick"; n.textContent = m.nick; row.appendChild(n); }
+    var b = document.createElement("div"); b.className = "bubble"; b.textContent = m.text; row.appendChild(b);
+    var t = document.createElement("div"); t.className = "time"; t.textContent = fmt(m.ts); row.appendChild(t);
+    list.appendChild(row);
+  });
+  if (near) list.scrollTop = list.scrollHeight;
+}
+
+// 다른 사람이 보낸 데이터는 믿지 않고 검증해서 받는다
+function clean(m){
+  if (!m || typeof m !== "object") return null;
+  if (typeof m.id !== "string" || m.id.length > 40) return null;
+  if (typeof m.text !== "string" || !m.text || typeof m.nick !== "string" || !m.nick) return null;
+  var ts = Number(m.ts), now = Date.now();
+  if (!isFinite(ts) || now - ts >= TTL) return null;
+  return { id: m.id, nick: m.nick.slice(0, 12), text: m.text.slice(0, 300), uid: String(m.uid || "").slice(0, 40), ts: Math.min(ts, now) };
+}
+function add(m){ var c = clean(m); if (c && !byId[c.id]) { byId[c.id] = c; return true; } return false; }
+
+function sweep(){
+  var now = Date.now();
+  Object.keys(byId).forEach(function(k){ if (now - byId[k].ts >= TTL) delete byId[k]; });
+  render();
+}
+
+function peers(){ try { return Object.keys(room.getPeers()).length; } catch(e){ return 0; } }
+function count(){ $("cnt").textContent = "접속 " + (peers() + 1) + "명"; }
+
+$("send").addEventListener("submit", function(e){
+  e.preventDefault();
+  var text = $("text").value.trim();
+  if (!text) return;
+  if (!nick) { showJoin(true); return; }
+  $("text").value = "";
+  var m = { id: uid + "-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), nick: nick, text: text.slice(0, 300), uid: uid, ts: Date.now() };
+  add(m); render(); $("list").scrollTop = $("list").scrollHeight;
+  if (sendMsg) sendMsg(m);
+});
+
+function fail(msg){
+  ready = true; $("cnt").textContent = "연결 실패";
+  $("text").disabled = true; $("go").disabled = true; $("text").placeholder = "연결할 수 없어요";
+  notice(msg);
+}
+
+import("https://cdn.jsdelivr.net/npm/trystero@0.21.5/+esm").then(function(mod){
+  room = mod.joinRoom({ appId: APP_ID }, ROOM);
+  var a = room.makeAction("chat"), h = room.makeAction("hist");
+  sendMsg = a[0]; sendHist = h[0];
+  a[1](function(m){ if (add(m)) render(); });
+  h[1](function(list){ if (Array.isArray(list) && list.slice(0, 200).map(add).some(Boolean)) render(); });
+  room.onPeerJoin(function(id){ count(); var l = live(); if (l.length) sendHist(l, id); });
+  room.onPeerLeave(count);
+  ready = true; count(); render();
+  setInterval(count, 5000);
+}).catch(function(e){
+  fail("연결 모듈을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.");
+});
+
+setInterval(sweep, 10000);
+render();
+})();
+</script>
+</body>
+</html>
